@@ -1,5 +1,8 @@
 # 📊 PySpark CSV Analyzer
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://aziendeitalianepiemonte.streamlit.app/)
+
+
 A full data pipeline that processes large CSV files with **PySpark** and visualizes results with an interactive **Streamlit** dashboard.
 
 ---
