@@ -9,7 +9,7 @@ Three pages:
 Run with:  streamlit run app.py
 """
 
-import os, glob, subprocess, threading
+import os, glob, subprocess, threading, sys
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -386,7 +386,7 @@ elif page == "🚕 Taxi Analysis":
         log_lines       = []
 
         process = subprocess.Popen(
-            ["python", "src/spark_processor.py"],
+            [sys.executable, "src/spark_processor.py"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
