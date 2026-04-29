@@ -70,6 +70,16 @@ def download_dataset() -> str:
 # ─────────────────────────────────────────────
 
 def get_spark() -> SparkSession:
+    # Make sure PySpark can find Java on Streamlit Cloud
+    import os
+    if not os.environ.get("JAVA_HOME"):
+        for path in ["/usr/lib/jvm/java-11-openjdk-amd64",
+                     "/usr/lib/jvm/java-11-openjdk",
+                     "/usr/lib/jvm/default-java"]:
+            if os.path.exists(path):
+                os.environ["JAVA_HOME"] = path
+                break
+
     return (
         SparkSession.builder
         .appName("NYC Taxi Analyzer")
