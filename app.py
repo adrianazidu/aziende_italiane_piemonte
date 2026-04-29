@@ -79,7 +79,25 @@ def load_csv(path: str) -> pd.DataFrame:
 # Kaggle helpers
 # ─────────────────────────────────────────────
 
+def setup_kaggle_credentials() -> bool:
+    import json
+    kaggle_json = os.path.expanduser("~/.kaggle/kaggle.json")
+    if os.path.exists(kaggle_json):
+        return True
+    try:
+        username = st.secrets["KAGGLE_USERNAME"]
+        key      = st.secrets["KAGGLE_KEY"]
+        os.makedirs(os.path.expanduser("~/.kaggle"), exist_ok=True)
+        with open(kaggle_json, "w") as f:
+            json.dump({"username": username, "key": key}, f)
+        os.chmod(kaggle_json, 0o600)
+        return True
+    except Exception:
+        return False
+
 def kaggle_ok() -> bool:
+    if not setup_kaggle_credentials():
+        return False
     try:
         import kaggle; kaggle.api.authenticate(); return True
     except Exception: return False
@@ -89,7 +107,7 @@ def kaggle_search(query, sort_by, n):
     try:
         import kaggle; kaggle.api.authenticate()
         rows = kaggle.api.dataset_list(search=query, sort_by=sort_by,
-                                       file_type="csv", page_size=n)
+                                       file_type="csv")
         return [{"ref": str(r.ref), "title": str(r.title),
                  "size": fmt_size(getattr(r,"totalBytes",None)),
                  "downloads": getattr(r,"downloadCount",0),
@@ -97,7 +115,7 @@ def kaggle_search(query, sort_by, n):
                  "updated": str(getattr(r,"lastUpdated",""))[:10],
                  "desc": str(getattr(r,"description","") or "")[:180],
                  "url": f"https://www.kaggle.com/datasets/{r.ref}"}
-                for r in rows]
+                for r in list(rows)[:n]]
     except Exception as e:
         return {"error": str(e)}
 
@@ -298,17 +316,21 @@ elif page == "🚕 Taxi Analysis":
     st.markdown("---")
     st.subheader("▶️ Run the Pipeline")
 
+    # Session state tracks whether pipeline is currently running
+    if "pipeline_running" not in st.session_state:
+        st.session_state.pipeline_running = False
+
     already_ran = any(
         os.path.exists(os.path.join(TAXI_DIR, f))
         for f in TAXI_OUTPUTS.keys()
     )
 
-    if already_ran:
+    if already_ran and not st.session_state.pipeline_running:
         st.success("✅ Pipeline has already been run. Scroll down to see results. "
                    "Click the button to re-run with fresh data.")
 
     col_btn, col_info = st.columns([1, 3])
-    run_clicked = col_btn.button("🚀 Run Spark Pipeline", type="primary")
+
     col_info.markdown("""
     What this does:
     - Downloads the NYC Yellow Taxi dataset from Kaggle (~1.5M rows)
@@ -318,40 +340,53 @@ elif page == "🚕 Taxi Analysis":
     ⏱️ Takes 2–5 minutes on first run (download + Spark startup).
     """)
 
+    # Show button only when pipeline is NOT running
+    if not st.session_state.pipeline_running:
+        run_clicked = col_btn.button("🚀 Run Spark Pipeline", type="primary")
+    else:
+        col_btn.warning("⏳ Running…")
+        run_clicked = False
+
     if run_clicked:
         if not kaggle_ok():
             st.error("Kaggle credentials not found. Set up `~/.kaggle/kaggle.json` first.")
             st.stop()
 
+        # Hide the button immediately
+        st.session_state.pipeline_running = True
+        st.rerun()
+
+    if st.session_state.pipeline_running:
         log_placeholder = st.empty()
         progress_bar    = st.progress(0)
         log_lines       = []
 
-        with st.spinner("Running Spark pipeline…"):
-            process = subprocess.Popen(
-                ["python", "src/spark_processor.py"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
+        process = subprocess.Popen(
+            ["python", "src/spark_processor.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
 
-            steps = ["Downloading", "Loading", "Outlier", "Window",
-                     "Session", "Pivot", "Time Series", "Join", "Done"]
-            step_i = 0
+        steps = ["Downloading", "Loading", "Outlier", "Window",
+                 "Session", "Pivot", "Time Series", "Join", "Done"]
+        step_i = 0
 
-            for line in process.stdout:
-                log_lines.append(line.rstrip())
-                log_placeholder.code("\n".join(log_lines[-20:]), language="bash")
+        for line in process.stdout:
+            log_lines.append(line.rstrip())
+            log_placeholder.code("\n".join(log_lines[-20:]), language="bash")
 
-                # Advance progress bar based on keywords in output
-                for i, keyword in enumerate(steps):
-                    if keyword.lower() in line.lower() and i > step_i:
-                        step_i = i
-                        progress_bar.progress(min(int((step_i / len(steps)) * 100), 99))
+            for i, keyword in enumerate(steps):
+                if keyword.lower() in line.lower() and i > step_i:
+                    step_i = i
+                    progress_bar.progress(min(int((step_i / len(steps)) * 100), 99))
 
-            process.wait()
-            progress_bar.progress(100)
+        process.wait()
+        progress_bar.progress(100)
+
+        # Unhide the button once done
+        st.session_state.pipeline_running = False
 
         if process.returncode == 0:
             st.success("✅ Pipeline complete!")
