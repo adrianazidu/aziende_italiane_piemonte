@@ -133,8 +133,19 @@ def kaggle_download(ref: str) -> tuple:
 
 st.sidebar.title("📊 CSV Analyzer")
 st.sidebar.markdown("---")
-page = st.sidebar.radio("**Navigate:**",
-                        ["🌐 Kaggle Browser", "🔬 Analyse", "🚕 Taxi Analysis"])
+
+# session_state tracks current page so we can switch programmatically
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "🌐 Kaggle Browser"
+
+page = st.sidebar.radio(
+    "**Navigate:**",
+    ["🌐 Kaggle Browser", "🔬 Analyse", "🚕 Taxi Analysis"],
+    index=["🌐 Kaggle Browser", "🔬 Analyse", "🚕 Taxi Analysis"].index(
+        st.session_state.current_page
+    ),
+)
+st.session_state.current_page = page
 
 csv_files = sorted(glob.glob(os.path.join(DATA_DIR, "*.csv")))
 if csv_files:
@@ -199,8 +210,14 @@ if page == "🌐 Kaggle Browser":
             with st.spinner(f"Downloading `{r['ref']}`…"):
                 ok, log = kaggle_download(r["ref"])
             if ok:
-                st.success("✅ Downloaded! Go to **🔬 Analyse**.")
+                # Find the CSV that was just downloaded
+                new_csvs = sorted(glob.glob(os.path.join(DATA_DIR, "*.csv")))
+                if new_csvs:
+                    newest = os.path.relpath(max(new_csvs, key=os.path.getmtime), DATA_DIR)
+                    st.session_state.preselected_file = newest
                 st.cache_data.clear()
+                st.session_state.current_page = "🔬 Analyse"
+                st.rerun()
             else:
                 st.error(f"Failed:\n```\n{log}\n```")
         b2.markdown(f"[🔗 Kaggle]({r['url']})")
@@ -222,8 +239,15 @@ elif page == "🔬 Analyse":
                    "or **🚕 Taxi Analysis** to run the Spark pipeline.")
         st.stop()
 
-    names  = [os.path.relpath(f, DATA_DIR) for f in all_csvs]
-    chosen = st.selectbox("**Choose a file:**", names)
+    names = [os.path.relpath(f, DATA_DIR) for f in all_csvs]
+
+    # Preselect file if coming from Kaggle Browser download
+    preselected = st.session_state.pop("preselected_file", None)
+    default_idx = 0
+    if preselected and preselected in names:
+        default_idx = names.index(preselected)
+
+    chosen = st.selectbox("**Choose a file:**", names, index=default_idx)
     df_raw = load_csv(os.path.join(DATA_DIR, chosen))
 
     st.caption(f"{len(df_raw):,} rows × {len(df_raw.columns)} columns — "
