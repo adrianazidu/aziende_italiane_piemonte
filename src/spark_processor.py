@@ -20,6 +20,28 @@ The script downloads the dataset automatically if not already present.
 """
 
 import os, sys, glob
+
+# Must be set BEFORE pyspark imports so the JVM picks them up at startup
+# Fixes: UnsupportedOperationException: getSubject is not supported (Java 17+)
+    # Java 17+ locked down internal APIs for security
+    # --add-opens opens locked package for everyone
+    # must be here not in spark session config, then spark has already started
+os.environ['JAVA_TOOL_OPTIONS'] = ' '.join([
+    '--add-opens=java.base/javax.security.auth=ALL-UNNAMED',
+    '--add-opens=java.base/java.lang=ALL-UNNAMED',
+    '--add-opens=java.base/java.lang.invoke=ALL-UNNAMED',
+    '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+    '--add-opens=java.base/java.io=ALL-UNNAMED',
+    '--add-opens=java.base/java.net=ALL-UNNAMED',
+    '--add-opens=java.base/java.nio=ALL-UNNAMED',
+    '--add-opens=java.base/java.util=ALL-UNNAMED',
+    '--add-opens=java.base/java.util.concurrent=ALL-UNNAMED',
+    '--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED',
+    '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
+    '--add-opens=java.base/sun.nio.cs=ALL-UNNAMED',
+    '--add-opens=java.base/sun.util.calendar=ALL-UNNAMED',
+])
+
 from pyspark.sql import SparkSession, Window
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType
@@ -80,11 +102,30 @@ def get_spark() -> SparkSession:
                 os.environ["JAVA_HOME"] = path
                 break
 
+    # Fix for Java 17+ compatibility on Windows
+    java_opts = " ".join([
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED",
+        "--add-opens=java.base/java.net=ALL-UNNAMED",
+        "--add-opens=java.base/java.nio=ALL-UNNAMED",
+        "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
+        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+        "--add-opens=java.base/sun.nio.cs=ALL-UNNAMED",
+        "--add-opens=java.base/sun.security.action=ALL-UNNAMED",
+        "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
+    ])
+
     return (
         SparkSession.builder
         .appName("NYC Taxi Analyzer")
         .config("spark.driver.memory", "4g")
         .config("spark.sql.shuffle.partitions", "8")
+        .config("spark.driver.extraJavaOptions", java_opts)
+        .config("spark.executor.extraJavaOptions", java_opts)
         .getOrCreate()
     )
 
