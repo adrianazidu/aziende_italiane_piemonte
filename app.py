@@ -349,75 +349,93 @@ elif page == "🚕 Taxi Analysis":
         for f in TAXI_OUTPUTS.keys()
     )
 
-    if already_ran and not st.session_state.pipeline_running:
-        st.success("✅ Pipeline has already been run. Scroll down to see results. "
-                   "Click the button to re-run with fresh data.")
+    # Detect if pyspark is available (local) or not (Streamlit Cloud)
+    try:
+        import pyspark
+        is_local = True
+    except ImportError:
+        is_local = False
 
-    col_btn, col_info = st.columns([1, 3])
+    if not is_local:
+        # On Streamlit Cloud — show instructions, no button
+        st.info("""
+**ℹ️ Spark runs on your local machine, not on the cloud.**
 
-    col_info.markdown("""
-    What this does:
-    - Downloads the NYC Yellow Taxi dataset from Kaggle (~1.5M rows)
-    - Runs 7 Spark transformations (outliers, window functions, sessionization, pivot, time series, join)
-    - Writes one CSV per transformation to `data/taxi/`
+PySpark needs 4GB+ RAM and Java — too heavy for Streamlit Cloud free tier.
 
-    ⏱️ Takes 2–5 minutes on first run (download + Spark startup).
-    """)
-
-    # Show button only when pipeline is NOT running
-    if not st.session_state.pipeline_running:
-        run_clicked = col_btn.button("🚀 Run Spark Pipeline", type="primary")
+Run this locally instead:
+```bash
+python src/spark_processor.py
+```
+Then push the output files:
+```bash
+git add data/taxi/
+git commit -m "Add Spark outputs"
+git push
+```
+Streamlit redeploys automatically and shows results below.
+        """)
     else:
-        col_btn.warning("⏳ Running…")
-        run_clicked = False
+        # On local machine — show the run button
+        if already_ran and not st.session_state.pipeline_running:
+            st.success("✅ Pipeline already run. Scroll down for results.")
 
-    if run_clicked:
-        if not kaggle_ok():
-            st.error("Kaggle credentials not found. Set up `~/.kaggle/kaggle.json` first.")
-            st.stop()
+        col_btn, col_info = st.columns([1, 3])
+        col_info.markdown("""
+        - Downloads the NYC Yellow Taxi dataset from Kaggle (~1.5M rows)
+        - Runs 7 Spark transformations
+        - Writes one CSV per transformation to `data/taxi/`
+        ⏱️ 2–5 minutes on first run.
+        """)
 
-        # Hide the button immediately
-        st.session_state.pipeline_running = True
-        st.rerun()
-
-    if st.session_state.pipeline_running:
-        log_placeholder = st.empty()
-        progress_bar    = st.progress(0)
-        log_lines       = []
-
-        process = subprocess.Popen(
-            [sys.executable, "src/spark_processor.py"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-
-        steps = ["Downloading", "Loading", "Outlier", "Window",
-                 "Session", "Pivot", "Time Series", "Join", "Done"]
-        step_i = 0
-
-        for line in process.stdout:
-            log_lines.append(line.rstrip())
-            log_placeholder.code("\n".join(log_lines[-20:]), language="bash")
-
-            for i, keyword in enumerate(steps):
-                if keyword.lower() in line.lower() and i > step_i:
-                    step_i = i
-                    progress_bar.progress(min(int((step_i / len(steps)) * 100), 99))
-
-        process.wait()
-        progress_bar.progress(100)
-
-        # Unhide the button once done
-        st.session_state.pipeline_running = False
-
-        if process.returncode == 0:
-            st.success("✅ Pipeline complete!")
-            st.cache_data.clear()
+        if not st.session_state.pipeline_running:
+            run_clicked = col_btn.button("🚀 Run Spark Pipeline", type="primary")
         else:
-            st.error("❌ Pipeline failed. Check the log above.")
-            st.stop()
+            col_btn.warning("⏳ Running…")
+            run_clicked = False
+
+        if run_clicked:
+            if not kaggle_ok():
+                st.error("Kaggle credentials not found. Set up `~/.kaggle/kaggle.json` first.")
+                st.stop()
+            st.session_state.pipeline_running = True
+            st.rerun()
+
+        if st.session_state.pipeline_running:
+            log_placeholder = st.empty()
+            progress_bar    = st.progress(0)
+            log_lines       = []
+
+            process = subprocess.Popen(
+                [sys.executable, "src/spark_processor.py"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            steps = ["Downloading", "Loading", "Outlier", "Window",
+                     "Session", "Pivot", "Time Series", "Join", "Done"]
+            step_i = 0
+
+            for line in process.stdout:
+                log_lines.append(line.rstrip())
+                log_placeholder.code("\n".join(log_lines[-20:]), language="bash")
+                for i, keyword in enumerate(steps):
+                    if keyword.lower() in line.lower() and i > step_i:
+                        step_i = i
+                        progress_bar.progress(min(int((step_i / len(steps)) * 100), 99))
+
+            process.wait()
+            progress_bar.progress(100)
+            st.session_state.pipeline_running = False
+
+            if process.returncode == 0:
+                st.success("✅ Pipeline complete!")
+                st.cache_data.clear()
+            else:
+                st.error("❌ Pipeline failed. Check the log above.")
+                st.stop()
 
     # ── Results ───────────────────────────────
     available_outputs = {
